@@ -1,0 +1,12 @@
+# Python cache and bytecode files
+__pycache__/
+*.pyc
+
+# Environment variables
+.env
+
+# Virtual environment directory
+venv/
+
+# Local data files
+*.local
