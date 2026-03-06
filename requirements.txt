@@ -1,0 +1,5 @@
+# Requirements for Desktop Application
+
+PyQt6
+cryptography
+# Add any other necessary packages below
