@@ -37,7 +37,7 @@ Installation
 
     Run python main.py
     Create a new account (username and password)
-    You start with 100 credits
+    You start with 0 credits (earn by selling to peers)
 
 2. Wallet Tab
 
@@ -139,7 +139,7 @@ Modify Settings
 
 Edit config.py to change:
 
-    Starting balance (default: 100)
+    Starting balance (default: 0)
     Data directory location
     Window size and appearance
     Currency name and symbol
@@ -147,7 +147,7 @@ Edit config.py to change:
 Example Config
 Python
 
-STARTING_BALANCE = 100
+STARTING_BALANCE = 0
 DATA_DIR = "data/"
 CURRENCY_NAME = "Credits"
 CURRENCY_SYMBOL = "CC"
