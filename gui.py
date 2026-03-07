@@ -1,11 +1,11 @@
 import sys
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QLabel, QLineEdit, QPushButton, 
                               QVBoxLayout, QHBoxLayout, QWidget, QTabWidget, QListWidget, 
-                              QListWidgetItem, QTextEdit, QComboBox)
-from PyQt6.QtCore import Qt
+                              QListWidgetItem, QTextEdit, QComboBox, QCheckBox)
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QColor
 from datetime import datetime
-from network.bluetooth_manager import BluetoothManager
+from network.network_manager import NetworkManager
 from network.network_sync import NetworkSync
 from network.transaction_broadcaster import TransactionBroadcaster
 from peer_manager import PeerManager
@@ -13,58 +13,64 @@ from peer_manager import PeerManager
 class MainApplication(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle('Community Credit Mesh - Desktop')
-        self.setGeometry(100, 100, 800, 600)
+        self.setWindowTitle('Community Credit Mesh - Desktop (Phase 1 & 2)')
+        self.setGeometry(100, 100, 900, 700)
         
-        # Initialize network components
-        self.bt_manager = BluetoothManager()
+        # Initialize unified network manager (handles both Bluetooth and WiFi)
+        self.network_manager = NetworkManager("My-CCM-Device")
         self.network_sync = NetworkSync()
-        self.broadcaster = TransactionBroadcaster(self.network_sync, self.bt_manager)
+        self.broadcaster = TransactionBroadcaster(self.network_sync, self.network_manager)
         self.peer_manager = PeerManager()
         
         # Set up callbacks
-        self.bt_manager.set_callback('on_peer_found', self.on_peer_found)
-        self.bt_manager.set_callback('on_peer_connected', self.on_peer_connected)
-        self.bt_manager.set_callback('on_peer_disconnected', self.on_peer_disconnected)
-        self.bt_manager.set_callback('on_data_received', self.on_data_received)
-        self.bt_manager.set_callback('on_error', self.on_network_error)
+        self.network_manager.set_callback('on_data_received', self.on_data_received)
+        self.network_manager.set_callback('on_error', self.on_network_error)
         
         self.current_user = None
         self.balance = 100
         self.server_running = False
+        self.wifi_mode = 'server'  # server or client
         
         self.initUI()
+        
+        # Auto-broadcast presence every 5 seconds
+        self.broadcast_timer = QTimer()
+        self.broadcast_timer.timeout.connect(self.broadcast_wifi_presence)
+        self.broadcast_timer.start(5000)
     
     def initUI(self):
         """Initialize the user interface"""
-        # Create tab widget
         self.tabs = QTabWidget()
         self.setCentralWidget(self.tabs)
         
         # Create tabs
         self.wallet_tab = self.create_wallet_tab()
         self.send_tab = self.create_send_tab()
-        self.network_tab = self.create_network_tab()
+        self.bluetooth_tab = self.create_bluetooth_tab()
+        self.wifi_tab = self.create_wifi_tab()
         self.peers_tab = self.create_peers_tab()
+        self.status_tab = self.create_status_tab()
         
         # Add tabs
         self.tabs.addTab(self.wallet_tab, "💳 Wallet")
         self.tabs.addTab(self.send_tab, "📤 Send")
-        self.tabs.addTab(self.network_tab, "🌐 Network")
+        self.tabs.addTab(self.bluetooth_tab, "🔵 Bluetooth")
+        self.tabs.addTab(self.wifi_tab, "🌐 WiFi")
         self.tabs.addTab(self.peers_tab, "👥 Peers")
+        self.tabs.addTab(self.status_tab, "📊 Status")
     
     def create_wallet_tab(self):
         """Create Wallet tab"""
         widget = QWidget()
         layout = QVBoxLayout()
         
-        layout.addWidget(QLabel("Welcome to Community Credit Mesh"))
+        layout.addWidget(QLabel("💳 Community Credit Mesh Wallet"))
         
         self.wallet_status = QLabel(f"Status: Not logged in")
         layout.addWidget(self.wallet_status)
         
         self.balance_label = QLabel(f"Balance: {self.balance} Credits")
-        self.balance_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #4CAF50;")
+        self.balance_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #4CAF50;")
         layout.addWidget(self.balance_label)
         
         # Login section
@@ -88,7 +94,7 @@ class MainApplication(QMainWindow):
         widget = QWidget()
         layout = QVBoxLayout()
         
-        layout.addWidget(QLabel("Send Credits"))
+        layout.addWidget(QLabel("📤 Send Credits"))
         
         layout.addWidget(QLabel("Recipient:"))
         self.recipient_input = QLineEdit()
@@ -102,8 +108,8 @@ class MainApplication(QMainWindow):
         self.description_input = QLineEdit()
         layout.addWidget(self.description_input)
         
-        send_btn = QPushButton("Send Credits")
-        send_btn.setStyleSheet("background-color: #4CAF50; color: white; padding: 10px;")
+        send_btn = QPushButton("📤 Send & Broadcast")
+        send_btn.setStyleSheet("background-color: #4CAF50; color: white; padding: 10px; font-weight: bold;")
         send_btn.clicked.connect(self.send_credits)
         layout.addWidget(send_btn)
         
@@ -115,156 +121,276 @@ class MainApplication(QMainWindow):
         widget.setLayout(layout)
         return widget
     
-    def create_network_tab(self):
-        """Create Network tab with Bluetooth controls"""
+    def create_bluetooth_tab(self):
+        """Create Bluetooth tab"""
         widget = QWidget()
         layout = QVBoxLayout()
         
-        # Status
-        layout.addWidget(QLabel("🌐 Bluetooth Network Status", ))
-        self.network_status = QLabel("Status: ❌ Disconnected")
-        self.network_status.setStyleSheet("color: red; font-weight: bold;")
-        layout.addWidget(self.network_status)
+        layout.addWidget(QLabel("🔵 Bluetooth Network"))
         
-        # Server controls
+        self.bt_status = QLabel("Status: ❌ Disconnected")
+        self.bt_status.setStyleSheet("color: red; font-weight: bold;")
+        layout.addWidget(self.bt_status)
+        
+        # Server control
         server_layout = QHBoxLayout()
-        self.server_btn = QPushButton("▶ Start Server")
-        self.server_btn.clicked.connect(self.toggle_server)
-        self.server_btn.setStyleSheet("background-color: #FF9800; color: white; padding: 10px;")
-        server_layout.addWidget(self.server_btn)
+        self.bt_server_btn = QPushButton("▶ Start Bluetooth Server")
+        self.bt_server_btn.clicked.connect(self.toggle_bt_server)
+        self.bt_server_btn.setStyleSheet("background-color: #FF9800; color: white; padding: 10px;")
+        server_layout.addWidget(self.bt_server_btn)
         
-        scan_btn = QPushButton("🔍 Scan Devices")
-        scan_btn.clicked.connect(self.scan_devices)
-        scan_btn.setStyleSheet("background-color: #2196F3; color: white; padding: 10px;")
-        server_layout.addWidget(scan_btn)
+        bt_scan_btn = QPushButton("🔍 Scan Devices")
+        bt_scan_btn.clicked.connect(self.scan_bt_devices)
+        bt_scan_btn.setStyleSheet("background-color: #2196F3; color: white; padding: 10px;")
+        server_layout.addWidget(bt_scan_btn)
         
         layout.addLayout(server_layout)
         
-        # Available devices
-        layout.addWidget(QLabel("Available Devices:"))
-        self.device_list = QListWidget()
-        layout.addWidget(self.device_list)
+        layout.addWidget(QLabel("Available Bluetooth Devices:"))
+        self.bt_device_list = QListWidget()
+        layout.addWidget(self.bt_device_list)
         
-        # Connect button
-        connect_btn = QPushButton("🔗 Connect Selected")
-        connect_btn.clicked.connect(self.connect_device)
-        connect_btn.setStyleSheet("background-color: #4CAF50; color: white; padding: 10px;")
-        layout.addWidget(connect_btn)
+        bt_connect_btn = QPushButton("🔗 Connect Selected")
+        bt_connect_btn.clicked.connect(self.connect_bt_device)
+        bt_connect_btn.setStyleSheet("background-color: #4CAF50; color: white; padding: 10px;")
+        layout.addWidget(bt_connect_btn)
         
-        # Connected peers
-        layout.addWidget(QLabel("Connected Peers:"))
-        self.connected_peers_list = QListWidget()
-        layout.addWidget(self.connected_peers_list)
+        layout.addWidget(QLabel("Connected Bluetooth Peers:"))
+        self.bt_peers_list = QListWidget()
+        layout.addWidget(self.bt_peers_list)
         
-        # Disconnect button
-        disconnect_btn = QPushButton("❌ Disconnect Selected")
-        disconnect_btn.clicked.connect(self.disconnect_device)
-        disconnect_btn.setStyleSheet("background-color: #f44336; color: white; padding: 10px;")
-        layout.addWidget(disconnect_btn)
+        bt_disconnect_btn = QPushButton("❌ Disconnect")
+        bt_disconnect_btn.clicked.connect(self.disconnect_bt_device)
+        bt_disconnect_btn.setStyleSheet("background-color: #f44336; color: white; padding: 10px;")
+        layout.addWidget(bt_disconnect_btn)
         
-        # Messages
-        layout.addWidget(QLabel("Network Messages:"))
-        self.network_messages = QTextEdit()
-        self.network_messages.setReadOnly(True)
-        self.network_messages.setMaximumHeight(150)
-        layout.addWidget(self.network_messages)
+        widget.setLayout(layout)
+        return widget
+    
+    def create_wifi_tab(self):
+        """Create WiFi tab"""
+        widget = QWidget()
+        layout = QVBoxLayout()
+        
+        layout.addWidget(QLabel("🌐 WiFi Network"))
+        
+        self.wifi_status = QLabel("Status: ❌ Not running")
+        self.wifi_status.setStyleSheet("color: red; font-weight: bold;")
+        layout.addWidget(self.wifi_status)
+        
+        # Mode selection
+        mode_layout = QHBoxLayout()
+        mode_layout.addWidget(QLabel("WiFi Mode:"))
+        
+        self.wifi_mode_combo = QComboBox()
+        self.wifi_mode_combo.addItems(["📡 Server (receive connections)", "🔌 Client (connect to server)"])
+        mode_layout.addWidget(self.wifi_mode_combo)
+        
+        layout.addLayout(mode_layout)
+        
+        # Server mode
+        layout.addWidget(QLabel("Server Mode:"))
+        wifi_server_layout = QHBoxLayout()
+        
+        self.wifi_server_btn = QPushButton("▶ Start WiFi Server")
+        self.wifi_server_btn.clicked.connect(self.toggle_wifi_server)
+        self.wifi_server_btn.setStyleSheet("background-color: #FF9800; color: white; padding: 10px;")
+        wifi_server_layout.addWidget(self.wifi_server_btn)
+        
+        wifi_discover_btn = QPushButton("🔍 Start Discovery")
+        wifi_discover_btn.clicked.connect(self.start_wifi_discovery)
+        wifi_discover_btn.setStyleSheet("background-color: #2196F3; color: white; padding: 10px;")
+        wifi_server_layout.addWidget(wifi_discover_btn)
+        
+        layout.addLayout(wifi_server_layout)
+        
+        layout.addWidget(QLabel("Discovered WiFi Devices:"))
+        self.wifi_device_list = QListWidget()
+        layout.addWidget(self.wifi_device_list)
+        
+        # Client mode
+        layout.addWidget(QLabel("Client Mode:"))
+        client_layout = QHBoxLayout()
+        client_layout.addWidget(QLabel("Server IP:"))
+        self.server_ip_input = QLineEdit()
+        self.server_ip_input.setPlaceholderText("192.168.1.100")
+        client_layout.addWidget(self.server_ip_input)
+        
+        wifi_connect_btn = QPushButton("🔗 Connect to Server")
+        wifi_connect_btn.clicked.connect(self.connect_wifi_server)
+        wifi_connect_btn.setStyleSheet("background-color: #4CAF50; color: white; padding: 10px;")
+        client_layout.addWidget(wifi_connect_btn)
+        
+        layout.addLayout(client_layout)
+        
+        layout.addWidget(QLabel("Connected WiFi Clients:"))
+        self.wifi_clients_list = QListWidget()
+        layout.addWidget(self.wifi_clients_list)
+        
+        wifi_disconnect_btn = QPushButton("❌ Disconnect All WiFi")
+        wifi_disconnect_btn.clicked.connect(self.disconnect_wifi_all)
+        wifi_disconnect_btn.setStyleSheet("background-color: #f44336; color: white; padding: 10px;")
+        layout.addWidget(wifi_disconnect_btn)
         
         widget.setLayout(layout)
         return widget
     
     def create_peers_tab(self):
-        """Create Peers tab for managing connections"""
+        """Create Peers tab"""
         widget = QWidget()
         layout = QVBoxLayout()
         
         layout.addWidget(QLabel("👥 Connected Peers Management"))
         
-        # Peer list
-        layout.addWidget(QLabel("Known Peers:"))
+        layout.addWidget(QLabel("All Peers:"))
         self.peers_list = QListWidget()
         layout.addWidget(self.peers_list)
         
-        # Peer info
         layout.addWidget(QLabel("Peer Details:"))
         self.peer_details = QTextEdit()
         self.peer_details.setReadOnly(True)
         self.peer_details.setMaximumHeight(200)
         layout.addWidget(self.peer_details)
         
-        # Mark favorite button
+        button_layout = QHBoxLayout()
+        
         fav_btn = QPushButton("⭐ Mark as Favorite")
         fav_btn.clicked.connect(self.mark_favorite)
-        layout.addWidget(fav_btn)
+        button_layout.addWidget(fav_btn)
         
-        # Refresh button
         refresh_btn = QPushButton("🔄 Refresh")
         refresh_btn.clicked.connect(self.refresh_peers)
-        layout.addWidget(refresh_btn)
+        button_layout.addWidget(refresh_btn)
+        
+        layout.addLayout(button_layout)
         
         widget.setLayout(layout)
         return widget
     
-    # Network Methods
-    def toggle_server(self):
+    def create_status_tab(self):
+        """Create Status tab"""
+        widget = QWidget()
+        layout = QVBoxLayout()
+        
+        layout.addWidget(QLabel("📊 Network Status & Messages"))
+        
+        self.status_display = QTextEdit()
+        self.status_display.setReadOnly(True)
+        layout.addWidget(self.status_display)
+        
+        widget.setLayout(layout)
+        return widget
+    
+    # Bluetooth Methods
+    def toggle_bt_server(self):
         """Start/Stop Bluetooth server"""
         if not self.server_running:
-            self.bt_manager.start_server()
+            self.network_manager.bluetooth.start_server()
             self.server_running = True
-            self.server_btn.setText("⏹ Stop Server")
-            self.server_btn.setStyleSheet("background-color: #FF5722; color: white; padding: 10px;")
-            self.log_network_message("✅ Bluetooth server started")
+            self.bt_server_btn.setText("⏹ Stop Bluetooth Server")
+            self.bt_server_btn.setStyleSheet("background-color: #FF5722; color: white; padding: 10px;")
+            self.log_message("✅ Bluetooth server started")
         else:
-            self.bt_manager.stop_server()
+            self.network_manager.bluetooth.stop_server()
             self.server_running = False
-            self.server_btn.setText("▶ Start Server")
-            self.server_btn.setStyleSheet("background-color: #FF9800; color: white; padding: 10px;")
-            self.log_network_message("⏹ Bluetooth server stopped")
+            self.bt_server_btn.setText("▶ Start Bluetooth Server")
+            self.bt_server_btn.setStyleSheet("background-color: #FF9800; color: white; padding: 10px;")
+            self.log_message("⏹ Bluetooth server stopped")
     
-    def scan_devices(self):
+    def scan_bt_devices(self):
         """Scan for Bluetooth devices"""
-        self.log_network_message("🔍 Scanning for devices...")
-        devices = self.bt_manager.scan_for_devices(timeout=5)
+        self.log_message("🔍 Scanning for Bluetooth devices...")
+        devices = self.network_manager.bluetooth.scan_for_devices(timeout=5)
         
-        self.device_list.clear()
+        self.bt_device_list.clear()
         for addr, info in devices.items():
             item_text = f"{info['name']} ({addr})"
-            item = QListWidgetItem(item_text)
-            self.device_list.addItem(item)
+            self.bt_device_list.addItem(item_text)
         
-        self.log_network_message(f"✅ Found {len(devices)} devices")
+        self.log_message(f"✅ Found {len(devices)} Bluetooth devices")
     
-    def connect_device(self):
-        """Connect to selected device"""
-        selected = self.device_list.currentItem()
+    def connect_bt_device(self):
+        """Connect to Bluetooth device"""
+        selected = self.bt_device_list.currentItem()
         if not selected:
-            self.log_network_message("⚠️ Please select a device")
+            self.log_message("⚠️ Please select a device")
             return
         
         text = selected.text()
         addr = text.split('(')[1].rstrip(')')
         
-        self.log_network_message(f"🔗 Connecting to {addr}...")
-        success = self.bt_manager.connect_to_peer(addr)
+        self.log_message(f"🔗 Connecting to Bluetooth {addr}...")
+        success = self.network_manager.connect_bluetooth(addr)
         
         if success:
-            self.log_network_message(f"✅ Connected to {addr}")
+            self.log_message(f"✅ Connected via Bluetooth to {addr}")
         else:
-            self.log_network_message(f"❌ Failed to connect to {addr}")
+            self.log_message(f"❌ Failed to connect")
     
-    def disconnect_device(self):
-        """Disconnect from selected peer"""
-        selected = self.connected_peers_list.currentItem()
+    def disconnect_bt_device(self):
+        """Disconnect Bluetooth device"""
+        selected = self.bt_peers_list.currentItem()
         if not selected:
-            self.log_network_message("⚠️ Please select a peer")
+            self.log_message("⚠️ Please select a peer")
             return
         
         peer = selected.text()
-        self.bt_manager.disconnect_peer(peer)
-        self.log_network_message(f"✅ Disconnected from {peer}")
+        self.network_manager.disconnect_all()
+        self.log_message(f"✅ Disconnected")
+        self.update_connection_status()
+    
+    # WiFi Methods
+    def toggle_wifi_server(self):
+        """Start/Stop WiFi server"""
+        if self.network_manager.wifi_server.listening:
+            self.network_manager.wifi_server.stop()
+            self.wifi_server_btn.setText("▶ Start WiFi Server")
+            self.wifi_server_btn.setStyleSheet("background-color: #FF9800; color: white; padding: 10px;")
+            self.log_message("⏹ WiFi server stopped")
+        else:
+            self.network_manager.wifi_server.start()
+            ip = self.network_manager.wifi_discovery.get_local_ip()
+            self.wifi_server_btn.setText("⏹ Stop WiFi Server")
+            self.wifi_server_btn.setStyleSheet("background-color: #FF5722; color: white; padding: 10px;")
+            self.log_message(f"✅ WiFi server started at {ip}:5556")
+    
+    def start_wifi_discovery(self):
+        """Start WiFi device discovery"""
+        self.log_message("🔍 Starting WiFi discovery...")
+        self.network_manager.wifi_discovery.start_discovery()
+        self.log_message("✅ WiFi discovery started (broadcasting presence every 5 seconds)")
+    
+    def broadcast_wifi_presence(self):
+        """Broadcast WiFi presence"""
+        self.network_manager.wifi_discovery.broadcast_presence()
+    
+    def connect_wifi_server(self):
+        """Connect to WiFi server"""
+        server_ip = self.server_ip_input.text()
+        if not server_ip:
+            self.log_message("⚠️ Please enter server IP")
+            return
+        
+        self.log_message(f"🔗 Connecting to WiFi server at {server_ip}...")
+        success = self.network_manager.connect_wifi(server_ip)
+        
+        if success:
+            self.log_message(f"✅ Connected to WiFi server at {server_ip}")
+        else:
+            self.log_message(f"❌ Failed to connect to WiFi server")
+        
+        self.update_connection_status()
+    
+    def disconnect_wifi_all(self):
+        """Disconnect all WiFi connections"""
+        self.network_manager.wifi_server.disconnect_all()
+        self.network_manager.wifi_client.disconnect()
+        self.log_message("✅ All WiFi connections closed")
+        self.update_connection_status()
     
     # Transaction Methods
     def send_credits(self):
-        """Send credits and broadcast to peers"""
+        """Send credits with broadcast"""
         if not self.current_user:
             self.send_status.setText("❌ Please login first")
             self.send_status.setStyleSheet("color: red;")
@@ -282,49 +408,45 @@ class MainApplication(QMainWindow):
         try:
             amount = float(amount)
             
-            # Validate balance
             if amount > self.balance:
                 self.send_status.setText("❌ Insufficient balance")
                 self.send_status.setStyleSheet("color: red;")
                 return
             
-            # Update local balance
             self.balance -= amount
             self.balance_label.setText(f"Balance: {self.balance} Credits")
             
-            # Broadcast transaction to peers
             result = self.broadcaster.broadcast_transaction(
                 self.current_user, recipient, amount, description
             )
             
-            self.send_status.setText(f"✅ Sent {amount} credits to {recipient} (notified {result['peers_notified']} peers)")
+            total_peers = (result['peers_notified'] if 'peers_notified' in result else 0)
+            self.send_status.setText(f"✅ Sent {amount} to {recipient} ({total_peers} peers notified)")
             self.send_status.setStyleSheet("color: green;")
             
-            # Clear inputs
             self.recipient_input.clear()
             self.amount_input.clear()
             self.description_input.clear()
             
-            self.log_network_message(f"📤 Broadcasted transaction to {result['peers_notified']} peers")
+            self.log_message(f"📤 Transaction broadcast: {self.current_user} → {recipient}: {amount} credits")
             
         except ValueError:
             self.send_status.setText("❌ Invalid amount")
             self.send_status.setStyleSheet("color: red;")
     
-    # Peer Management Methods
+    # Peer Management
     def refresh_peers(self):
-        """Refresh peer list"""
+        """Refresh peers list"""
         self.peers_list.clear()
         peers = self.peer_manager.get_all_peers()
         
         for addr, info in peers.items():
             favorite = "⭐" if info.get('favorite') else "  "
             item_text = f"{favorite} {info['name']} ({addr})"
-            item = QListWidgetItem(item_text)
-            self.peers_list.addItem(item)
+            self.peers_list.addItem(item_text)
     
     def mark_favorite(self):
-        """Mark selected peer as favorite"""
+        """Mark peer as favorite"""
         selected = self.peers_list.currentItem()
         if not selected:
             return
@@ -339,69 +461,46 @@ class MainApplication(QMainWindow):
             self.refresh_peers()
     
     # Callbacks
-    def on_peer_found(self, peer_info):
-        """Callback when peer is found"""
-        self.log_network_message(f"🔍 Found: {peer_info['name']}")
-    
-    def on_peer_connected(self, peer_info):
-        """Callback when peer connects"""
-        addr = peer_info['address']
-        self.update_peers_list()
-        self.update_network_status()
-        self.log_network_message(f"✅ Connected: {addr}")
-        self.peer_manager.record_connection(addr, f"Device-{addr[:8]}", 'connected')
-    
-    def on_peer_disconnected(self, peer_info):
-        """Callback when peer disconnects"""
-        addr = peer_info['address']
-        self.update_peers_list()
-        self.update_network_status()
-        self.log_network_message(f"❌ Disconnected: {addr}")
-        self.peer_manager.record_connection(addr, f"Device-{addr[:8]}", 'disconnected')
-    
     def on_data_received(self, message):
-        """Callback when data is received"""
+        """Handle received data"""
         try:
             data = message['data']
             if data['type'] == 'transaction':
                 success = self.network_sync.process_received_transaction(data)
                 if success:
-                    self.log_network_message(f"📥 Received transaction: {data['sender']} → {data['receiver']}: {data['amount']} credits")
-                    # Update balance if you're the receiver
+                    self.log_message(f"📥 Transaction: {data['sender']} → {data['receiver']}: {data['amount']}")
                     if data['receiver'] == self.current_user:
                         self.balance += data['amount']
                         self.balance_label.setText(f"Balance: {self.balance} Credits")
         except Exception as e:
-            self.log_network_message(f"⚠️ Error processing data: {str(e)}")
+            self.log_message(f"⚠️ Error: {str(e)}")
     
     def on_network_error(self, error):
-        """Callback for network errors"""
-        self.log_network_message(f"❌ Error: {error}")
+        """Handle network errors"""
+        self.log_message(f"❌ Error: {error}")
     
     # UI Updates
-    def update_peers_list(self):
-        """Update connected peers list"""
-        self.connected_peers_list.clear()
-        peers = self.bt_manager.get_connected_peers()
-        for peer in peers:
-            self.connected_peers_list.addItem(peer)
-    
-    def update_network_status(self):
-        """Update network status indicator"""
-        peers = self.bt_manager.get_connected_peers()
-        if peers:
-            self.network_status.setText(f"Status: ✅ Connected ({len(peers)} peers)")
-            self.network_status.setStyleSheet("color: green; font-weight: bold;")
+    def update_connection_status(self):
+        """Update connection status"""
+        status = self.network_manager.get_connection_status()
+        
+        total = status['total_connections']
+        if total > 0:
+            self.bt_status.setText(f"✅ Connected ({total} connections)")
+            self.bt_status.setStyleSheet("color: green; font-weight: bold;")
+            self.wifi_status.setText(f"✅ Connected ({total} connections)")
+            self.wifi_status.setStyleSheet("color: green; font-weight: bold;")
         else:
-            self.network_status.setText("Status: ❌ Disconnected")
-            self.network_status.setStyleSheet("color: red; font-weight: bold;")
+            self.bt_status.setText("Status: ❌ Disconnected")
+            self.bt_status.setStyleSheet("color: red; font-weight: bold;")
+            self.wifi_status.setText("Status: ❌ Not running")
+            self.wifi_status.setStyleSheet("color: red; font-weight: bold;")
     
-    def log_network_message(self, message):
-        """Log a message to the network messages area"""
+    def log_message(self, message):
+        """Log message to status tab"""
         timestamp = datetime.now().strftime('%H:%M:%S')
-        self.network_messages.append(f"[{timestamp}] {message}")
+        self.status_display.append(f"[{timestamp}] {message}")
     
-    # Auth Methods
     def login(self):
         """Handle login"""
         username = self.username_input.text()
@@ -414,6 +513,7 @@ class MainApplication(QMainWindow):
         self.wallet_status.setText(f"✅ Logged in as: {username}")
         self.wallet_status.setStyleSheet("color: green;")
         self.username_input.setReadOnly(True)
+        self.log_message(f"👤 User {username} logged in")
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
