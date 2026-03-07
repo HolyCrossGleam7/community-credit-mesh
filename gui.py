@@ -27,7 +27,7 @@ class MainApplication(QMainWindow):
         self.network_manager.set_callback('on_error', self.on_network_error)
         
         self.current_user = None
-        self.balance = 100
+        self.balance = 0
         self.server_running = False
         self.wifi_mode = 'server'  # server or client
         
@@ -69,9 +69,10 @@ class MainApplication(QMainWindow):
         self.wallet_status = QLabel(f"Status: Not logged in")
         layout.addWidget(self.wallet_status)
         
-        self.balance_label = QLabel(f"Balance: {self.balance} Credits")
-        self.balance_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #4CAF50;")
+        self.balance_label = QLabel("")
+        self.balance_label.setStyleSheet("font-size: 18px; font-weight: bold;")
         layout.addWidget(self.balance_label)
+        self.update_balance_display()
         
         # Login section
         login_layout = QHBoxLayout()
@@ -429,7 +430,7 @@ class MainApplication(QMainWindow):
             self.description_input.clear()
             
             self.log_message(f"📤 Transaction broadcast: {self.current_user} → {recipient}: {amount} credits")
-            
+                   self.update_balance_display()                 
         except ValueError:
             self.send_status.setText("❌ Invalid amount")
             self.send_status.setStyleSheet("color: red;")
@@ -514,6 +515,18 @@ class MainApplication(QMainWindow):
         self.wallet_status.setStyleSheet("color: green;")
         self.username_input.setReadOnly(True)
         self.log_message(f"👤 User {username} logged in")
+         
+     def update_balance_display(self):
+        """Update balance display with debt/credit indication"""
+        if self.balance >= 0:
+            text = f"💚 Credit: +{self.balance} Credits"
+            color = "#4CAF50"  # Green for credit
+        else:
+            text = f"❌ Debt: {self.balance} Credits"
+            color = "#f44336"  # Red for debt
+        
+        self.balance_label.setText(text)
+        self.balance_label.setStyleSheet(f"font-size: 18px; font-weight: bold; color: {color};")
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
