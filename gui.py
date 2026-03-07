@@ -9,6 +9,7 @@ from network.network_manager import NetworkManager
 from network.network_sync import NetworkSync
 from network.transaction_broadcaster import TransactionBroadcaster
 from peer_manager import PeerManager
+from debt_tracker import DebtTracker
 
 class MainApplication(QMainWindow):
     def __init__(self):
@@ -30,6 +31,7 @@ class MainApplication(QMainWindow):
         self.balance = 0
         self.server_running = False
         self.wifi_mode = 'server'  # server or client
+        self.debt_tracker = DebtTracker()
         
         self.initUI()
         
@@ -72,6 +74,11 @@ class MainApplication(QMainWindow):
         self.balance_label = QLabel("")
         self.balance_label.setStyleSheet("font-size: 18px; font-weight: bold;")
         layout.addWidget(self.balance_label)
+        
+        self.debt_warning_label = QLabel("")
+        self.debt_warning_label.setWordWrap(True)
+        layout.addWidget(self.debt_warning_label)
+        
         self.update_balance_display()
         
         # Login section
@@ -113,6 +120,10 @@ class MainApplication(QMainWindow):
         send_btn.setStyleSheet("background-color: #4CAF50; color: white; padding: 10px; font-weight: bold;")
         send_btn.clicked.connect(self.send_credits)
         layout.addWidget(send_btn)
+        
+        self.send_debt_warning_label = QLabel("")
+        self.send_debt_warning_label.setWordWrap(True)
+        layout.addWidget(self.send_debt_warning_label)
         
         self.send_status = QLabel("")
         layout.addWidget(self.send_status)
@@ -397,6 +408,11 @@ class MainApplication(QMainWindow):
             self.send_status.setStyleSheet("color: red;")
             return
         
+        if self.debt_tracker.is_in_debt(self.current_user):
+            self.send_status.setText("❌ Cannot send credits while a debt is active. Please repay your debt first.")
+            self.send_status.setStyleSheet("color: red;")
+            return
+        
         recipient = self.recipient_input.text()
         amount = self.amount_input.text()
         description = self.description_input.text()
@@ -409,13 +425,10 @@ class MainApplication(QMainWindow):
         try:
             amount = float(amount)
             
-            if amount > self.balance:
-                self.send_status.setText("❌ Insufficient balance")
-                self.send_status.setStyleSheet("color: red;")
-                return
-            
             self.balance -= amount
-            self.balance_label.setText(f"Balance: {self.balance} Credits")
+            
+            if self.balance < 0:
+                self.debt_tracker.record_debt(self.current_user, abs(self.balance))
             
             result = self.broadcaster.broadcast_transaction(
                 self.current_user, recipient, amount, description
@@ -430,7 +443,8 @@ class MainApplication(QMainWindow):
             self.description_input.clear()
             
             self.log_message(f"📤 Transaction broadcast: {self.current_user} → {recipient}: {amount} credits")
-                   self.update_balance_display()                 
+            self.update_balance_display()
+            self.update_debt_warnings()
         except ValueError:
             self.send_status.setText("❌ Invalid amount")
             self.send_status.setStyleSheet("color: red;")
@@ -472,7 +486,11 @@ class MainApplication(QMainWindow):
                     self.log_message(f"📥 Transaction: {data['sender']} → {data['receiver']}: {data['amount']}")
                     if data['receiver'] == self.current_user:
                         self.balance += data['amount']
-                        self.balance_label.setText(f"Balance: {self.balance} Credits")
+                        if self.balance >= 0 and self.debt_tracker.is_in_debt(self.current_user):
+                            self.debt_tracker.clear_debt(self.current_user)
+                            self.log_message("✅ Debt cleared — balance restored to non-negative")
+                        self.update_balance_display()
+                        self.update_debt_warnings()
         except Exception as e:
             self.log_message(f"⚠️ Error: {str(e)}")
     
@@ -515,8 +533,54 @@ class MainApplication(QMainWindow):
         self.wallet_status.setStyleSheet("color: green;")
         self.username_input.setReadOnly(True)
         self.log_message(f"👤 User {username} logged in")
-         
-     def update_balance_display(self):
+        
+        debt_status = self.debt_tracker.get_debt_status(username)
+        if debt_status['has_debt']:
+            if debt_status['status'] == 'overdue':
+                self.log_message(f"🚨 DEBT OVERDUE by {debt_status['overdue_by']} days! Amount: {debt_status['amount']} credits")
+            elif debt_status['status'] == 'due_today':
+                self.log_message(f"⚠️ Debt due TODAY! Amount: {debt_status['amount']} credits")
+            else:
+                days = debt_status['days_remaining']
+                day_word = 'day' if days == 1 else 'days'
+                self.log_message(f"⏳ Active debt: {debt_status['amount']} credits — {days} {day_word} remaining to repay")
+        else:
+            self.log_message("✅ No active debt")
+        
+        self.update_debt_warnings()
+    
+    def update_debt_warnings(self):
+        """Update debt warning labels in wallet and send tabs"""
+        if not self.current_user:
+            self.debt_warning_label.setText("")
+            self.send_debt_warning_label.setText("")
+            return
+        
+        debt_status = self.debt_tracker.get_debt_status(self.current_user)
+        
+        if not debt_status['has_debt']:
+            self.debt_warning_label.setText("")
+            self.send_debt_warning_label.setText("")
+            return
+        
+        if debt_status['status'] == 'overdue':
+            msg = f"🚨 DEBT OVERDUE by {debt_status['overdue_by']} days! Repay {debt_status['amount']} credits to resume sending."
+            style = "color: #b71c1c; font-weight: bold; background-color: #ffebee; padding: 6px; border-radius: 4px;"
+        elif debt_status['status'] == 'due_today':
+            msg = f"⚠️ Debt of {debt_status['amount']} credits is due TODAY! Sending is blocked."
+            style = "color: #e65100; font-weight: bold; background-color: #fff3e0; padding: 6px; border-radius: 4px;"
+        else:
+            days = debt_status['days_remaining']
+            day_word = 'day' if days == 1 else 'days'
+            msg = f"⏳ Active debt: {debt_status['amount']} credits — {days} {day_word} remaining to repay. Sending is blocked."
+            style = "color: #f57f17; font-weight: bold; background-color: #fffde7; padding: 6px; border-radius: 4px;"
+        
+        self.debt_warning_label.setText(msg)
+        self.debt_warning_label.setStyleSheet(style)
+        self.send_debt_warning_label.setText(msg)
+        self.send_debt_warning_label.setStyleSheet(style)
+    
+    def update_balance_display(self):
         """Update balance display with debt/credit indication"""
         if self.balance >= 0:
             text = f"💚 Credit: +{self.balance} Credits"
