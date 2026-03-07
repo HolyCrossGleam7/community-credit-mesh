@@ -3,3 +3,5 @@
 PyQt6
 cryptography
 # Add any other necessary packages below
+pybluez==0.23
+pybluetoothctl==0.1.3
