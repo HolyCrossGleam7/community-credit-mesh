@@ -156,6 +156,46 @@ CURRENCY_SYMBOL = "CC"
 
 ✅ No Server - Your data never leaves your device ✅ No Tracking - No analytics or telemetry ✅ No Ads - Completely ad-free ✅ Open Source - Full transparency ✅ Local Storage - All data on your machine
 
+## 🔑 Digital ID & Signed Transactions
+
+Each user is automatically assigned a **Digital ID** — a unique cryptographic
+signing key (Ed25519) that is generated when you first log in and stored
+privately on your device.
+
+### How it works
+
+1. **Login with password** — On first use your account is created and your
+   password is stored as a secure hash (never in plain text).  On subsequent
+   logins the password is verified; access is denied if it does not match.
+
+2. **Every transaction is signed** — When you send credits, the transaction
+   packet is signed with your private key.  Recipients can verify that the
+   packet really came from you and was not tampered with.
+
+3. **Trust-on-first-use (TOFU)** — The first time you receive a message from a
+   username, their public key is *pinned* locally.  Future messages from the
+   same username must use the same key.  If they differ, the transaction is
+   **blocked** and an error is shown in the Status tab.
+
+### Why this matters
+
+Without signed transactions a malicious peer could forge a payment claiming to
+be from anyone.  Signed transactions and key-pinning ensure you only accept
+credits from the person who actually has the private key for that username.
+
+### Resetting trust (peer changed devices)
+
+If a trusted peer reinstalls the application or uses a new device their Digital
+ID changes.  You will see a "Blocked — public key mismatch" error.
+
+To allow re-pairing:
+
+1. Open the **Peers** tab.
+2. Type the peer's username in the "Reset Trust for User" field.
+3. Click **Reset Trust for User**.
+4. The next message from that username will be accepted and their new key
+   pinned automatically.
+
 ⚠️ Security Tips:
 
     Keep your device secure
