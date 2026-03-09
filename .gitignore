@@ -10,3 +10,8 @@ venv/
 
 # Local data files
 *.local
+
+# Security-sensitive runtime data (never commit user credentials or private keys)
+users.json
+trusted_peers.json
+keys/

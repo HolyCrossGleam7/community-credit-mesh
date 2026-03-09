@@ -10,6 +10,12 @@ from network.network_sync import NetworkSync
 from network.transaction_broadcaster import TransactionBroadcaster
 from peer_manager import PeerManager
 from debt_tracker import DebtTracker
+import user_store
+import key_store
+import trusted_peers as trusted_peers_mod
+
+# Number of hex characters shown when abbreviating a public key in the UI.
+_KEY_DISPLAY_CHARS = 16
 
 class MainApplication(QMainWindow):
     def __init__(self):
@@ -32,6 +38,9 @@ class MainApplication(QMainWindow):
         self.server_running = False
         self.wifi_mode = 'server'  # server or client
         self.debt_tracker = DebtTracker()
+        # Per-user signing keypair (set on successful login)
+        self._private_key = None
+        self._public_key_hex = None
         
         self.initUI()
         
@@ -87,7 +96,12 @@ class MainApplication(QMainWindow):
         self.username_input = QLineEdit()
         login_layout.addWidget(self.username_input)
         
-        login_btn = QPushButton("Login")
+        login_layout.addWidget(QLabel("Password:"))
+        self.password_input = QLineEdit()
+        self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
+        login_layout.addWidget(self.password_input)
+        
+        login_btn = QPushButton("Login / Register")
         login_btn.clicked.connect(self.login)
         login_layout.addWidget(login_btn)
         
@@ -276,7 +290,37 @@ class MainApplication(QMainWindow):
         
         layout.addLayout(button_layout)
         
+        # --- Reset Trust section -----------------------------------------
+        layout.addWidget(QLabel(""))  # spacer
+        layout.addWidget(QLabel("🔑 Trusted Digital IDs"))
+        layout.addWidget(QLabel(
+            "Each user has a unique Digital ID (signing key).  "
+            "The first message from a username pins their ID.\n"
+            "If a peer changed devices their ID changes — reset trust below to allow re-pairing."
+        ))
+        self.trusted_keys_display = QTextEdit()
+        self.trusted_keys_display.setReadOnly(True)
+        self.trusted_keys_display.setMaximumHeight(120)
+        layout.addWidget(self.trusted_keys_display)
+        
+        reset_layout = QHBoxLayout()
+        reset_layout.addWidget(QLabel("Username:"))
+        self.reset_trust_input = QLineEdit()
+        self.reset_trust_input.setPlaceholderText("username whose trust to reset")
+        reset_layout.addWidget(self.reset_trust_input)
+        
+        reset_trust_btn = QPushButton("🔄 Reset Trust for User")
+        reset_trust_btn.setStyleSheet("background-color: #FF9800; color: white; padding: 8px;")
+        reset_trust_btn.clicked.connect(self.reset_trust_for_user)
+        reset_layout.addWidget(reset_trust_btn)
+        
+        layout.addLayout(reset_layout)
+        
+        self.reset_trust_status = QLabel("")
+        layout.addWidget(self.reset_trust_status)
+        
         widget.setLayout(layout)
+        self._refresh_trusted_keys_display()
         return widget
     
     def create_status_tab(self):
@@ -474,6 +518,34 @@ class MainApplication(QMainWindow):
             is_favorite = not peer.get('favorite', False)
             self.peer_manager.set_favorite(addr, is_favorite)
             self.refresh_peers()
+
+    def reset_trust_for_user(self):
+        """Remove the pinned public key for the given username."""
+        username = self.reset_trust_input.text().strip()
+        if not username:
+            self.reset_trust_status.setText("⚠️ Please enter a username.")
+            self.reset_trust_status.setStyleSheet("color: orange;")
+            return
+        removed = trusted_peers_mod.reset_trust(username)
+        if removed:
+            self.reset_trust_status.setText(f"✅ Trust reset for '{username}'. Their next message will be re-trusted.")
+            self.reset_trust_status.setStyleSheet("color: green;")
+            self.log_message(f"🔑 Trust reset for '{username}'")
+        else:
+            self.reset_trust_status.setText(f"ℹ️ No pinned key found for '{username}'.")
+            self.reset_trust_status.setStyleSheet("color: gray;")
+        self._refresh_trusted_keys_display()
+
+    def _refresh_trusted_keys_display(self):
+        """Update the trusted-keys text box in the Peers tab (if it exists)."""
+        if not hasattr(self, 'trusted_keys_display'):
+            return
+        trusted = trusted_peers_mod.get_all_trusted()
+        if trusted:
+            lines = [f"{uname}: {key[:_KEY_DISPLAY_CHARS]}…" for uname, key in trusted.items()]
+            self.trusted_keys_display.setText("\n".join(lines))
+        else:
+            self.trusted_keys_display.setText("(no trusted peers yet)")
     
     # Callbacks
     def on_data_received(self, message):
@@ -481,9 +553,11 @@ class MainApplication(QMainWindow):
         try:
             data = message['data']
             if data['type'] == 'transaction':
-                success = self.network_sync.process_received_transaction(data)
+                success, msg = self.network_sync.process_received_transaction(data)
                 if success:
                     self.log_message(f"📥 Transaction: {data['sender']} → {data['receiver']}: {data['amount']}")
+                    # Pin new trusted key if this is the first time we see this sender.
+                    self._refresh_trusted_keys_display()
                     if data['receiver'] == self.current_user:
                         self.balance += data['amount']
                         if self.balance >= 0 and self.debt_tracker.is_in_debt(self.current_user):
@@ -491,6 +565,8 @@ class MainApplication(QMainWindow):
                             self.log_message("✅ Debt cleared — balance restored to non-negative")
                         self.update_balance_display()
                         self.update_debt_warnings()
+                else:
+                    self.log_message(f"🚫 Transaction blocked: {msg}")
         except Exception as e:
             self.log_message(f"⚠️ Error: {str(e)}")
     
@@ -521,19 +597,37 @@ class MainApplication(QMainWindow):
         self.status_display.append(f"[{timestamp}] {message}")
     
     def login(self):
-        """Handle login"""
-        username = self.username_input.text()
+        """Handle login / registration with password verification."""
+        username = self.username_input.text().strip()
+        password = self.password_input.text()
         if not username:
             self.wallet_status.setText("❌ Please enter a username")
             self.wallet_status.setStyleSheet("color: red;")
             return
-        
+        if not password:
+            self.wallet_status.setText("❌ Please enter a password")
+            self.wallet_status.setStyleSheet("color: red;")
+            return
+
+        success, is_new, auth_msg = user_store.register_or_verify(username, password)
+        if not success:
+            self.wallet_status.setText(f"❌ {auth_msg}")
+            self.wallet_status.setStyleSheet("color: red;")
+            return
+
+        # Load or generate this user's signing keypair.
+        self._private_key, self._public_key_hex = key_store.get_or_create_keypair(username)
+        self.network_sync.set_signing_key(self._private_key, self._public_key_hex)
+
         self.current_user = username
-        self.wallet_status.setText(f"✅ Logged in as: {username}")
+        action = "Registered" if is_new else "Logged in"
+        self.wallet_status.setText(f"✅ {action} as: {username}")
         self.wallet_status.setStyleSheet("color: green;")
         self.username_input.setReadOnly(True)
-        self.log_message(f"👤 User {username} logged in")
-        
+        self.password_input.setReadOnly(True)
+        short_key = self._public_key_hex[:_KEY_DISPLAY_CHARS] + "…"
+        self.log_message(f"👤 {action} as {username} | Digital ID: {short_key}")
+
         debt_status = self.debt_tracker.get_debt_status(username)
         if debt_status['has_debt']:
             if debt_status['status'] == 'overdue':
@@ -546,7 +640,7 @@ class MainApplication(QMainWindow):
                 self.log_message(f"⏳ Active debt: {debt_status['amount']} credits — {days} {day_word} remaining to repay")
         else:
             self.log_message("✅ No active debt")
-        
+
         self.update_debt_warnings()
     
     def update_debt_warnings(self):
