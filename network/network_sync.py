@@ -6,7 +6,8 @@ class NetworkSync:
         self.sync_history = []
         self.pending_transactions = []
         
-    def create_transaction_packet(self, sender, receiver, amount, description=""):
+    def create_transaction_packet(self, sender, receiver, amount, description="",
+                                   sender_public_key=None, signature=None):
         transaction = {
             'type': 'transaction',
             'sender': sender,
@@ -17,6 +18,10 @@ class NetworkSync:
             'transaction_id': self._generate_tx_id(sender, receiver, amount),
             'version': '1.0'
         }
+        if sender_public_key is not None:
+            transaction['sender_public_key'] = sender_public_key
+        if signature is not None:
+            transaction['signature'] = signature
         return transaction
     
     def create_sync_request(self, device_name, balance=None):

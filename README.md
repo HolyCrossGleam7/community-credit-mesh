@@ -156,11 +156,30 @@ CURRENCY_SYMBOL = "CC"
 
 ✅ No Server - Your data never leaves your device ✅ No Tracking - No analytics or telemetry ✅ No Ads - Completely ad-free ✅ Open Source - Full transparency ✅ Local Storage - All data on your machine
 
+🔐 Digital ID – How It Works
+
+Every user in Community Credit Mesh has a **Digital ID**: a unique cryptographic key pair generated automatically when you first log in.  Think of it as a personal seal — like a wax stamp that only you possess.
+
+When you send a transaction, the app uses your private key to attach an unforgeable **digital signature** to the packet.  Receiving devices verify that signature before applying the transaction.  This means:
+
+- Nobody can pretend to be you and send transactions in your name.
+- Transactions that were tampered with in transit are automatically rejected.
+
+🔑 Strict Identity Pinning (Blocking)
+
+The first time a transaction arrives from a given username, the sender's public key is **pinned** (remembered).  Every later transaction from that username must carry the same key.  If the key does not match, the transaction is **blocked** and an error is shown in the Status tab — no credits change hands.
+
+This prevents attackers from hijacking an existing username with a different key.
+
+🔓 Reset Trust (Status Tab)
+
+If a peer genuinely replaced their key (new device, reinstall, etc.) you can **Reset Trust** for that username on the **Status tab**.  After the reset, the next valid signed transaction from that username will be accepted and its new key will be automatically re-pinned.
+
 ⚠️ Security Tips:
 
     Keep your device secure
     Don't share your account password
-    Backup your data folder regularly
+    Backup your data folder regularly (especially data/keys.json)
     Use strong passwords
     Don't give access to others
 
