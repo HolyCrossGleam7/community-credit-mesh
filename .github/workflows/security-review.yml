@@ -1,0 +1,211 @@
+name: Scheduled Security Review
+
+on:
+  schedule:
+    # Run on the first day of every month at 08:00 UTC
+    - cron: '0 8 1 * *'
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: 'Reason for manual run'
+        required: false
+        default: 'Manual security review'
+
+permissions:
+  contents: read
+  issues: write
+  security-events: write
+
+jobs:
+  python-security-scan:
+    name: Python Static Security Analysis (Bandit)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Bandit
+        run: pip install bandit[toml]
+
+      - name: Run Bandit security scan
+        run: |
+          bandit -r . \
+            --exclude ./.git,./data \
+            --format json \
+            --output bandit-report.json \
+            --severity-level low \
+            --confidence-level low || true
+
+      - name: Display Bandit summary
+        run: |
+          python - <<'EOF'
+          import json, sys
+          with open("bandit-report.json") as f:
+              report = json.load(f)
+          metrics = report.get("metrics", {})
+          results = report.get("results", [])
+          totals = metrics.get("_totals", {})
+          high   = totals.get("SEVERITY.HIGH", 0)
+          medium = totals.get("SEVERITY.MEDIUM", 0)
+          low    = totals.get("SEVERITY.LOW", 0)
+          print(f"Bandit results — HIGH: {high}  MEDIUM: {medium}  LOW: {low}")
+          for r in results:
+              sev = r.get("issue_severity", "")
+              if sev in ("HIGH", "MEDIUM"):
+                  print(f"  [{sev}] {r['issue_text']} — {r['filename']}:{r['line_number']}")
+          if high > 0:
+              sys.exit(1)
+          EOF
+
+      - name: Upload Bandit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bandit-report
+          path: bandit-report.json
+          retention-days: 90
+
+  dependency-vulnerability-scan:
+    name: Dependency Vulnerability Scan (pip-audit)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install pip-audit
+        run: pip install pip-audit
+
+      - name: Run pip-audit
+        run: |
+          pip-audit \
+            --requirement requirements.txt \
+            --format json \
+            --output pip-audit-report.json \
+            --no-deps || true
+
+      - name: Display pip-audit summary
+        run: |
+          python - <<'EOF'
+          import json
+          with open("pip-audit-report.json") as f:
+              report = json.load(f)
+          vulns = report.get("dependencies", [])
+          found = False
+          for dep in vulns:
+              if dep.get("vulns"):
+                  found = True
+                  print(f"Package: {dep['name']} {dep['version']}")
+                  for v in dep["vulns"]:
+                      print(f"  [{v['id']}] {v.get('description', 'No description')}")
+          if not found:
+              print("No known vulnerabilities found in dependencies.")
+          EOF
+
+      - name: Upload pip-audit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pip-audit-report
+          path: pip-audit-report.json
+          retention-days: 90
+
+  secret-detection:
+    name: Hardcoded Secret Detection
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install detect-secrets
+        run: pip install detect-secrets
+
+      - name: Scan for hardcoded secrets
+        run: |
+          detect-secrets scan \
+            --exclude-files '\.git/.*' \
+            --exclude-files 'data/.*' \
+            > secrets-baseline.json || true
+          python - <<'EOF'
+          import json
+          with open("secrets-baseline.json") as f:
+              baseline = json.load(f)
+          results = baseline.get("results", {})
+          total = sum(len(v) for v in results.values())
+          if total:
+              print(f"detect-secrets found {total} potential secret(s):")
+              for filepath, findings in results.items():
+                  for finding in findings:
+                      print(f"  {filepath}:{finding['line_number']} ({finding['type']})")
+          else:
+              print("No hardcoded secrets detected.")
+          EOF
+
+      - name: Upload secrets baseline
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: secrets-baseline
+          path: secrets-baseline.json
+          retention-days: 90
+
+  open-security-issue:
+    name: Open Monthly Security Review Issue
+    runs-on: ubuntu-latest
+    needs: [python-security-scan, dependency-vulnerability-scan, secret-detection]
+    if: always() && github.event_name == 'schedule'
+    steps:
+      - name: Create security review tracking issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const today = new Date().toISOString().split('T')[0];
+            const title = `[Security Review] Monthly check — ${today}`;
+            const body = [
+              "## Monthly Security Review",
+              "",
+              `**Date:** ${today}`,
+              `**Triggered by:** Scheduled workflow (first of month)`,
+              "",
+              "### Checklist",
+              "",
+              "- [ ] Review Bandit static analysis report (artifact: `bandit-report`)",
+              "- [ ] Review pip-audit dependency vulnerabilities (artifact: `pip-audit-report`)",
+              "- [ ] Review detect-secrets findings (artifact: `secrets-baseline`)",
+              "- [ ] Verify password hashing method is current (werkzeug PBKDF2-SHA256; consider scrypt as stronger alternative)",
+              "- [ ] Review access controls and authentication flow in `gui.py` / `user_manager.py`",
+              "- [ ] Confirm network communication (WiFi/Bluetooth) does not leak sensitive data",
+              "- [ ] Review data-at-rest security for `data/*.json` files",
+              "- [ ] Check PWA (community-credit-mesh-pwa) for HTTPS, CSP, and storage encryption",
+              "- [ ] Confirm no new hardcoded credentials in `config.py` or elsewhere",
+              "- [ ] Update `SECURITY.md` if new gaps or recommendations are found",
+              "",
+              "### Workflow run",
+              `Run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+              "",
+              "_This issue was automatically created by the [Scheduled Security Review workflow](.github/workflows/security-review.yml)._"
+            ].join("\n");
+
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              body,
+              labels: ["security", "review"]
+            });
