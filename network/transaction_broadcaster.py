@@ -14,15 +14,19 @@ class TransactionBroadcaster:
             sender, receiver, amount, description
         )
         
+        return self.broadcast_packet(transaction_packet)
+
+    def broadcast_packet(self, transaction_packet):
+        """Broadcast a pre-built (and optionally pre-signed) transaction packet."""
         # Broadcast to all connected peers
         peers_count = self.bluetooth_manager.broadcast_data(transaction_packet)
         
         # Record broadcast
         self.broadcast_history.append({
             'transaction_id': transaction_packet['transaction_id'],
-            'sender': sender,
-            'receiver': receiver,
-            'amount': amount,
+            'sender': transaction_packet['sender'],
+            'receiver': transaction_packet['receiver'],
+            'amount': transaction_packet['amount'],
             'peers_count': peers_count,
             'timestamp': datetime.now().isoformat()
         })
