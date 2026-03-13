@@ -11,6 +11,7 @@ from network.transaction_broadcaster import TransactionBroadcaster
 from peer_manager import PeerManager
 from debt_tracker import DebtTracker
 from identity_manager import IdentityManager
+from cold_wallet import ColdWallet
 
 
 def _canonical_bytes(packet):
@@ -44,6 +45,7 @@ class MainApplication(QMainWindow):
         self.wifi_mode = 'server'  # server or client
         self.debt_tracker = DebtTracker()
         self.identity_manager = IdentityManager()
+        self.cold_wallet = ColdWallet()
         
         self.initUI()
         
@@ -64,6 +66,7 @@ class MainApplication(QMainWindow):
         self.wifi_tab = self.create_wifi_tab()
         self.peers_tab = self.create_peers_tab()
         self.status_tab = self.create_status_tab()
+        self.cold_wallet_tab = self.create_cold_wallet_tab()
         
         # Add tabs
         self.tabs.addTab(self.wallet_tab, "💳 Wallet")
@@ -72,6 +75,7 @@ class MainApplication(QMainWindow):
         self.tabs.addTab(self.wifi_tab, "🌐 WiFi")
         self.tabs.addTab(self.peers_tab, "👥 Peers")
         self.tabs.addTab(self.status_tab, "📊 Status")
+        self.tabs.addTab(self.cold_wallet_tab, "🧊 Cold Wallet")
     
     def create_wallet_tab(self):
         """Create Wallet tab"""
@@ -640,6 +644,7 @@ class MainApplication(QMainWindow):
         
         self.update_debt_warnings()
         self.refresh_trust_list()
+        self.refresh_cold_wallet_list()
     
     def update_debt_warnings(self):
         """Update debt warning labels in wallet and send tabs"""
@@ -701,6 +706,184 @@ class MainApplication(QMainWindow):
         if removed:
             self.log_message(f"🔓 Trust reset for '{username}' — next valid signed transaction will re-pin")
         self.refresh_trust_list()
+
+    def create_cold_wallet_tab(self):
+        """Create Cold Wallet tab"""
+        widget = QWidget()
+        layout = QVBoxLayout()
+
+        layout.addWidget(QLabel("🧊 Cold Wallet — Freeze Credits into Items / Thaw Items back to Credits"))
+
+        # Inventory display
+        layout.addWidget(QLabel("Cold Storage Inventory:"))
+        self.cold_wallet_list = QListWidget()
+        layout.addWidget(self.cold_wallet_list)
+
+        # Freeze section
+        freeze_label = QLabel("❄️ Freeze Credits → Items")
+        freeze_label.setStyleSheet("font-weight: bold; margin-top: 8px;")
+        layout.addWidget(freeze_label)
+
+        freeze_row1 = QHBoxLayout()
+        freeze_row1.addWidget(QLabel("Item name:"))
+        self.freeze_item_input = QLineEdit()
+        self.freeze_item_input.setPlaceholderText("e.g. eggs")
+        freeze_row1.addWidget(self.freeze_item_input)
+        freeze_row1.addWidget(QLabel("Quantity:"))
+        self.freeze_qty_input = QLineEdit()
+        self.freeze_qty_input.setPlaceholderText("e.g. 10")
+        freeze_row1.addWidget(self.freeze_qty_input)
+        freeze_row1.addWidget(QLabel("Credits to spend:"))
+        self.freeze_credits_input = QLineEdit()
+        self.freeze_credits_input.setPlaceholderText("e.g. 10")
+        freeze_row1.addWidget(self.freeze_credits_input)
+        layout.addLayout(freeze_row1)
+
+        freeze_btn = QPushButton("❄️ Freeze Credits → Items")
+        freeze_btn.setStyleSheet("background-color: #1565C0; color: white; padding: 8px; font-weight: bold;")
+        freeze_btn.clicked.connect(self.handle_freeze)
+        layout.addWidget(freeze_btn)
+
+        # Thaw section
+        thaw_label = QLabel("🔥 Thaw Items → Credits")
+        thaw_label.setStyleSheet("font-weight: bold; margin-top: 8px;")
+        layout.addWidget(thaw_label)
+
+        thaw_row = QHBoxLayout()
+        thaw_row.addWidget(QLabel("Item name:"))
+        self.thaw_item_input = QLineEdit()
+        self.thaw_item_input.setPlaceholderText("e.g. eggs")
+        thaw_row.addWidget(self.thaw_item_input)
+        thaw_row.addWidget(QLabel("Quantity:"))
+        self.thaw_qty_input = QLineEdit()
+        self.thaw_qty_input.setPlaceholderText("e.g. 5")
+        thaw_row.addWidget(self.thaw_qty_input)
+        thaw_row.addWidget(QLabel("Price per unit:"))
+        self.thaw_price_input = QLineEdit()
+        self.thaw_price_input.setPlaceholderText("e.g. 3")
+        thaw_row.addWidget(self.thaw_price_input)
+        layout.addLayout(thaw_row)
+
+        thaw_btn = QPushButton("🔥 Thaw Items → Credits")
+        thaw_btn.setStyleSheet("background-color: #BF360C; color: white; padding: 8px; font-weight: bold;")
+        thaw_btn.clicked.connect(self.handle_thaw)
+        layout.addWidget(thaw_btn)
+
+        # Status label
+        self.cold_wallet_status = QLabel("")
+        self.cold_wallet_status.setWordWrap(True)
+        layout.addWidget(self.cold_wallet_status)
+
+        layout.addStretch()
+        widget.setLayout(layout)
+        return widget
+
+    def refresh_cold_wallet_list(self):
+        """Refresh the cold wallet inventory display."""
+        self.cold_wallet_list.clear()
+        if not self.current_user:
+            self.cold_wallet_list.addItem("(not logged in)")
+            return
+        items = self.cold_wallet.get_cold_wallet(self.current_user)
+        if not items:
+            self.cold_wallet_list.addItem("(cold wallet is empty)")
+        else:
+            for item_name, qty in items.items():
+                self.cold_wallet_list.addItem(f"{item_name}: {qty}")
+
+    def handle_freeze(self):
+        """Freeze credits into items in the cold wallet."""
+        if not self.current_user:
+            self.cold_wallet_status.setText("⚠️ Please log in first.")
+            return
+
+        item_name = self.freeze_item_input.text().strip()
+        qty_text = self.freeze_qty_input.text().strip()
+        credits_text = self.freeze_credits_input.text().strip()
+
+        if not item_name:
+            self.cold_wallet_status.setText("⚠️ Item name cannot be empty.")
+            return
+        try:
+            quantity = int(qty_text)
+            if quantity <= 0:
+                raise ValueError
+        except ValueError:
+            self.cold_wallet_status.setText("⚠️ Quantity must be a positive integer.")
+            return
+        try:
+            credits_amount = float(credits_text)
+            if credits_amount <= 0:
+                raise ValueError
+        except ValueError:
+            self.cold_wallet_status.setText("⚠️ Credits to spend must be a positive number.")
+            return
+
+        if self.balance < credits_amount:
+            self.cold_wallet_status.setText(
+                f"⚠️ Insufficient balance (have {self.balance}, need {credits_amount})."
+            )
+            return
+
+        self.balance -= credits_amount
+        self.cold_wallet.freeze(self.current_user, item_name, quantity)
+        self.update_balance_display()
+        self.refresh_cold_wallet_list()
+        self.freeze_item_input.clear()
+        self.freeze_qty_input.clear()
+        self.freeze_credits_input.clear()
+        self.cold_wallet_status.setText(
+            f"✅ Froze {quantity} × {item_name} (spent {credits_amount} credits). "
+            f"New balance: {self.balance}"
+        )
+
+    def handle_thaw(self):
+        """Thaw items from cold wallet back into credits at a user-set price."""
+        if not self.current_user:
+            self.cold_wallet_status.setText("⚠️ Please log in first.")
+            return
+
+        item_name = self.thaw_item_input.text().strip()
+        qty_text = self.thaw_qty_input.text().strip()
+        price_text = self.thaw_price_input.text().strip()
+
+        if not item_name:
+            self.cold_wallet_status.setText("⚠️ Item name cannot be empty.")
+            return
+        try:
+            quantity = int(qty_text)
+            if quantity <= 0:
+                raise ValueError
+        except ValueError:
+            self.cold_wallet_status.setText("⚠️ Quantity must be a positive integer.")
+            return
+        try:
+            price_per_unit = float(price_text)
+            if price_per_unit <= 0:
+                raise ValueError
+        except ValueError:
+            self.cold_wallet_status.setText("⚠️ Price per unit must be a positive number.")
+            return
+
+        success = self.cold_wallet.thaw(self.current_user, item_name, quantity)
+        if not success:
+            available = self.cold_wallet.get_item_quantity(self.current_user, item_name)
+            self.cold_wallet_status.setText(
+                f"⚠️ Not enough {item_name} in cold wallet (have {available}, need {quantity})."
+            )
+            return
+
+        total_credits = quantity * price_per_unit
+        self.balance += total_credits
+        self.update_balance_display()
+        self.refresh_cold_wallet_list()
+        self.thaw_item_input.clear()
+        self.thaw_qty_input.clear()
+        self.thaw_price_input.clear()
+        self.cold_wallet_status.setText(
+            f"✅ Thawed {quantity} × {item_name} at {price_per_unit} credits/unit = "
+            f"{total_credits} credits added. New balance: {self.balance}"
+        )
 
     def update_balance_display(self):
         """Update balance display with debt/credit indication"""
