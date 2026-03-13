@@ -3,7 +3,7 @@ Community Credit Mesh - Desktop Application
 💻 Desktop GUI for peer-to-peer mutual credit system using Python and PyQt6.
 ✨ Features
 
-✅ Graphical User Interface - Easy-to-use desktop application ✅ Wallet Management - Create and manage digital wallets ✅ Peer-to-Peer Transactions - Send and receive credits directly ✅ Transaction Ledger - View complete transaction history ✅ Common Fund - Contribute to and share community funds ✅ Time Banking - Track time-based contributions ✅ Local Storage - All data stored on your device ✅ No Server Required - Completely decentralized ✅ Open Source - GPLv3 license
+✅ Graphical User Interface - Easy-to-use desktop application ✅ Wallet Management - Create and manage digital wallets ✅ Peer-to-Peer Transactions - Send and receive credits directly ✅ Transaction Ledger - View complete transaction history ✅ Common Fund - Contribute to and share community funds ✅ Time Banking - Track time-based contributions ✅ Cold Wallet - Freeze credits into items and thaw back at your own price ✅ Local Storage - All data stored on your device ✅ No Server Required - Completely decentralized ✅ Open Source - GPLv3 license
 🚀 Quick Start
 System Requirements
 
@@ -83,6 +83,15 @@ Installation
     Exchange time for credits
     Manage time records
 
+8. Cold Wallet (🧊)
+
+    Freeze credits into items (e.g., eggs, rice, firewood)
+    Items stored locally with quantity only — no price stored
+    Thaw items back to credits at YOUR chosen price
+    You decide the value when you thaw — it's never automatic
+    View cold storage inventory and history
+    Useful for storing value in physical goods
+
 💡 How It Works
 Wallet System
 Code
@@ -124,6 +133,7 @@ community-credit-mesh/
 ├── transaction.py          # P2P transactions
 ├── common_fund.py          # Community fund management
 ├── time_bank.py            # Time banking system
+├── cold_wallet.py          # Cold wallet freeze/thaw operations
 ├── data_storage.py         # JSON data storage
 ├── config.py               # Configuration settings
 ├── requirements.txt        # Python dependencies
@@ -183,6 +193,32 @@ If a peer genuinely replaced their key (new device, reinstall, etc.) you can **R
     Use strong passwords
     Don't give access to others
 
+## 🧊 Cold Wallet — How It Works
+
+The Cold Wallet lets you convert credits into **items** (freeze) and convert items back into **credits** (thaw) at a price **you set manually**.
+
+### Freeze (Credits → Items)
+- Enter an item name (e.g., "eggs", "rice", "firewood")
+- Enter a quantity and the credits you want to spend
+- Credits are deducted from your wallet
+- Items are added to your cold storage (only name + quantity stored — **no price is saved**)
+
+### Thaw (Items → Credits)
+- Select an item from your cold storage
+- Enter the quantity to thaw
+- **You manually type the price per unit** — this is never automatic
+- Total credits = quantity × your price
+- Credits are added back to your wallet
+
+### Why no stored price?
+In a mutual credit community, the value of goods changes over time. The Cold Wallet deliberately does NOT store prices — **you decide what your items are worth when you thaw them**. This keeps the system flexible and community-driven.
+
+### Example
+1. Alice freezes 10 eggs for 5.00 credits (0.50/egg at freeze time)
+2. Later, eggs are more scarce
+3. Alice thaws 5 eggs at 1.00/egg (her choice) → receives 5.00 credits
+4. She still has 5 eggs in cold storage
+
 🐛 Troubleshooting
 Problem: "Python not found"
 
@@ -237,6 +273,12 @@ For mobile and web browsers, use the PWA version:
 
     Live App: https://HolyCrossGleam7.github.io/community-credit-mesh-pwa/
     Repository: https://github.com/HolyCrossGleam7/community-credit-mesh-pwa
+
+📡 LoRa Version
+
+For offline LoRa mesh networking on ESP32 hardware:
+
+    Repository: https://github.com/HolyCrossGleam7/community-credit-mesh-lora
 
 Both apps work peer-to-peer and independently!
 🔄 Data Backup
@@ -305,6 +347,14 @@ Time Bank
     Track contributions
     Community rewards
 
+Cold Wallet
+
+    Freeze credits into physical items
+    Thaw items back to credits at manual price
+    No stored price — you set value at thaw time
+    Track cold storage inventory
+    Full freeze/thaw history
+
 💚 Built for Community
 
 This software is designed to:
@@ -333,16 +383,3 @@ python main.py
 Community Credit Mesh Desktop - Empowering Communities 💚
 
 License: GPLv3 Status: Production Ready
-📋 How to Update It on GitHub
-
-    Go to: https://github.com/HolyCrossGleam7/community-credit-mesh
-    Click on README.md file
-    Click the pencil icon (Edit this file)
-    Select ALL text (Ctrl+A or Cmd+A)
-    Delete it
-    Paste the entire text above
-    Scroll to bottom
-    Click "Commit changes"
-    Leave message as default
-    Click "Commit directly to the main branch"
-    Done! ✅
