@@ -5,18 +5,21 @@ class ColdWallet:
         self.cold_wallets = {}  # {user_id: {item_name: quantity, ...}}
 
     def freeze(self, user_id, item_name, quantity):
-        """Add items to user's cold wallet."""
+        """Add items to cold wallet. Only stores name + qty, no price."""
         if user_id not in self.cold_wallets:
             self.cold_wallets[user_id] = {}
-        items = self.cold_wallets[user_id]
-        items[item_name] = items.get(item_name, 0) + quantity
+        if item_name in self.cold_wallets[user_id]:
+            self.cold_wallets[user_id][item_name] += quantity
+        else:
+            self.cold_wallets[user_id][item_name] = quantity
+        return True
 
     def thaw(self, user_id, item_name, quantity):
-        """Remove items from cold wallet. Returns True on success, False otherwise."""
+        """Remove items from cold wallet. Does NOT handle credits. Returns True on success, False otherwise."""
         if not self.has_item(user_id, item_name, quantity):
             return False
         self.cold_wallets[user_id][item_name] -= quantity
-        if self.cold_wallets[user_id][item_name] == 0:
+        if self.cold_wallets[user_id][item_name] <= 0:
             del self.cold_wallets[user_id][item_name]
         return True
 
