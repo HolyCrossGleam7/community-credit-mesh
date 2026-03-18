@@ -4,33 +4,60 @@ Community Credit Mesh - Desktop Application
 ✨ Features
 
 ✅ Graphical User Interface - Easy-to-use desktop application ✅ Wallet Management - Create and manage digital wallets ✅ Peer-to-Peer Transactions - Send and receive credits directly ✅ Transaction Ledger - View complete transaction history ✅ Common Fund - Contribute to and share community funds ✅ Time Banking - Track time-based contributions ✅ Cold Wallet - Freeze credits into items and thaw back at your own price ✅ Local Storage - All data stored on your device ✅ No Server Required - Completely decentralized ✅ Open Source - GPLv3 license
-🚀 Quick Start
-System Requirements
+## Arch/EndeavourOS Installation & Setup
 
-    Python 3.7 or higher
-    Windows, macOS, or Linux
-    100 MB disk space
-    No internet connection needed
+These steps are for **Arch Linux** and **EndeavourOS** users:
 
-Installation
+### Prerequisites
+- Python 3 (>=3.8 recommended)
+- `git` (for cloning)
 
-    Download and Extract
-    bash
+Install them if needed:
+```bash
+sudo pacman -S python git
+```
 
-    git clone https://github.com/HolyCrossGleam7/community-credit-mesh.git
-    cd community-credit-mesh
+### Clone the Repository
+```bash
+git clone https://github.com/HolyCrossGleam7/community-credit-mesh.git
+cd community-credit-mesh
+```
 
-    Install Dependencies
-    bash
+### Install System-level Dependencies
+Some Python dependencies (like bluetooth) need system headers:
+```bash
+sudo pacman -S bluez bluez-utils python-pip
+```
 
-    pip install -r requirements.txt
+If using GUI features:
+```bash
+sudo pacman -S qt6-base qt6-tools
+```
 
-    Run the Application
-    bash
+### Python Dependencies
+Install required Python packages:
+```bash
+pip install --upgrade pip
+pip install -r requirements.txt
+```
 
-    python main.py
+If you see errors with `PyQt6` or other packages, try using the AUR:
+```bash
+yay -S python-pyqt6
+```
+*(Or substitute `paru` for yay)*
 
-    Done! The GUI window will open
+### Running the Application
+```bash
+python main.py
+```
+
+### Troubleshooting
+- Enable bluetooth if needed:  
+  `sudo systemctl enable --now bluetooth`
+- If GUI fails, ensure `qt6-base` and `python-pyqt6` are installed.
+- For other missing Python packages, try the AUR:  
+  `yay -S <package-name>`
 
 📖 How to Use
 1. First Launch
